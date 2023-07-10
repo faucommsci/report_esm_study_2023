@@ -1,0 +1,1483 @@
+---
+# title: "Wohlbefinden, Arbeitsalltag und soziale Medien"
+lang: de
+format:
+  html:
+    toc: true
+    code-fold: false
+    code-summary: "Hide/Show code"
+    code-overflow: wrap
+    highlight-style: github-dark
+    self-contained: true
+    fig-width: 8
+    fig-height: 6
+execute: 
+  echo: false
+  warning: false
+  message: false
+editor_options: 
+  chunk_output_type: console
+crossref:
+  fig-title: '**Abb.**'
+  fig-labels: arabic
+  tbl-title: '**Tabelle**'
+  tbl-labels: arabic
+nocite: | 
+  @funder2019
+bibliography: references.bib
+csl: apa.csl
+---
+
+```{r load packages}
+# Load packages
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load_gh("hrbrmstr/waffle")
+pacman::p_load(
+  here, fs, qs, osfr, glue,
+  haven, knitr, janitor, psych, ggplot2,
+  sjmisc, sjPlot, magrittr, visdat, naniar, ggpubr, flextable,
+  gt, gtExtras, gtsummary,
+  ggridges, ggtext, hrbrthemes, ggcorrplot,
+  lme4, performance, parameters, see, patchwork, lmerTest, mediation,
+  kableExtra,tidyverse, RCurl,
+  apyramid, forcats, corrr, reshape2)
+
+# Load custom functions
+source(here("R/plot_likert_manual.R"))
+
+```
+
+```{r options}
+# Turn off scientific notations
+options(scipen=999)
+
+# Set global ggplot theme
+theme_set(theme_pubr())
+
+# Custom color palettes
+fau_blues1 <- c("#04316a", "#204981", "#3a5f96", "#5576ab", "#6f8cc0", "#89a2d5", "#a4b9ea", "#becfff")
+fau_blues2 <- c("#04316a", "#264d80", "#466795", "#6681aa", "#869cbf", "#a5b6d3", "#c5d0e8", "#e5eafd")
+```
+
+```{r setup backend}
+#| eval: false
+
+# Get data
+## Get OSF node
+osf_node <- osf_retrieve_node(Sys.getenv("OSF_PATH"))
+
+## Create local directory
+fs::dir_create(here("local_data")) 
+
+## Download data
+osf_download(
+  osf_ls_files(osf_node, pattern = "esm.qs"),
+  path = here("local_data"),
+  conflicts = "overwrite",
+  recurse = TRUE,
+  progress = TRUE
+)
+```
+
+```{r data processing}
+# Load base data into environment
+esm <- qread(here("local_data/esm.qs"))
+
+# Long structure
+esm_long <- esm$added %>%
+  # Filter by compliance & age
+  filter(finished_sum >= 5) %>% 
+  filter(age <= 67) %>% 
+  # Wrangling
+  tibble() %>% # ungroup
+  mutate(
+     # Create age groups
+    age_grp = dplyr::case_when(
+      age <= 20            ~ 1,
+      age > 20 & age <= 25 ~ 2,
+      age > 25 & age <= 30 ~ 3,
+      age > 30 & age <= 35 ~ 4,
+      age > 35 & age <= 40 ~ 5,
+      age > 40 & age <= 45 ~ 6,
+      age > 45 & age <= 50 ~ 7,
+      age > 50 & age <= 55 ~ 8,
+      age > 55 & age <= 60 ~ 9,
+      age > 60 & age <= 67 ~ 10,
+      age > 67             ~ 11
+    ),
+    age_grp_fct = factor(
+      age_grp,
+      levels = c(1:11),
+      labels = c(
+        "< 20",
+        "21 - 25", "26 - 30",
+        "31 - 35", "36 - 40",
+        "41 - 45", "46 - 50",
+        "51 - 55", "56 - 60",
+        "61 - 67", ">67")),
+    across(age_grp, as.factor),
+    # Convert `gender`to factor
+    gender_fct = factor(
+      gender,
+      levels = c(1:4),
+      labels = c("weiblich", "männlich", "divers", "keine Angabe")),
+    gender_dicho = rec(
+      gender, rec = "1=1; 2=2; else=NA"),
+    gender_dicho_fct = factor(
+      gender_dicho, 
+      levels = c(1:2),
+      labels = c(
+        "weiblich",
+        "männlich"
+      )),
+    # Label and group `occupation`
+    occupation_fct = factor(
+      occupation,
+      levels = c(1:14),
+      labels = c(
+        "Schüler:in",
+        "Student:in, ohne Nebenjob",
+        "Student:in, mit Nebenjob(s) (weniger als 20h/Woche)",
+        "Student:in, mit Nebenjob(s) (20h/Woche oder mehr)",
+        "In Lehre, Praktikum, Volontariat oder anderer Ausbildung",
+        "Angestellte:r in Teilzeit",
+        "Angestellte:r in Vollzeit",
+        "Beamte:r in Teilzeit",
+        "Beamte:r in Vollzeit",
+        "Selbstständig",
+        "Hausfrau/-mann",
+        "in Rente/Pension",
+        "Arbeitslos/arbeitsuchend",
+        "Sonstige")),
+    occupation_grp = rec(
+      occupation,
+      rec = " 1 = 1; 2,3,4 = 2; 5 = 3; 6,7 = 4; 8,9 = 5; 10 = 6; 11 = 7;
+      12 = 8; 13 = 9; 14 = 10; else = copy"), 
+    occupation_grp_fct = factor(
+      occupation_grp, levels = c(1:10),
+      labels = c("Schüler:in",
+                 "Student:in",
+                 "In Ausbildung", 
+                 "Angestellte:r", 
+                 "Beamtin/Beamter",
+                 "Selbstständig", 
+                 "Hausfrau/-mann", 
+                 "in Rente/Pension",
+                 "Arbeitslos/arbeitsuchend",
+                 "Sonstiges")), 
+    # Reverse `fatigue3` and `stress2`
+    across(c(fatigue3, stress2), ~rec(., rec = "rev")),
+    # Add labels
+    across(location, factor, 
+           levels = c(1:6),
+           labels = c("im Büro/auf der Arbeit",
+                      "im Homeoffice (= Arbeitszeit)",
+                      "zu Hause (= keine Arbeitszeit)",
+                      "unterwegs (Auto, Bus, Bahn etc.)",
+                      "draußen (Spazieren, Sport etc.)",
+                      "an sonstigem/n Ort/en"))
+  ) %>% 
+  # Build indices
+  row_means(procra_onset,procra_sustain, 
+            n = Inf, var = "idx_procra") %>% 
+  row_means(fatigue1, fatigue2, fatigue3, stress1, stress2, lonely1, lonely2,
+            n = Inf, var = "idx_affect") %>% 
+  row_means(fatigue1, fatigue2, fatigue3,
+            n = Inf, var = "idx_fatigue") %>% 
+  row_means(stress1, stress2,
+            n = Inf, var = "idx_stress") %>%
+  row_means(lonely1, lonely2,
+            n = Inf, var = "idx_lonely") %>%
+  # Centering
+  ## L1 
+  de_mean(., idx_procra, wellbeing, idx_affect, sm_sum, sm_sum_nocollab_trunc, 
+          grp = serial, suffix.dm = "_pmc", suffix.gm = "_pm") %>% 
+  center(., ends_with("_pm"), suffix = "_smc" ) %>% 
+  ## L2 
+  center(., age, working_hours, suffix = "_smc") 
+
+
+# Wide structure
+esm_wide <- esm_long %>% 
+  distinct(serial, .keep_all = TRUE)
+
+
+# Save output
+qsave(esm_long, file = here("local_data/esm_report_long.qs"))
+qsave(esm_wide, file = here("local_data/esm_report_wide.qs"))
+
+
+```
+
+## Studienbeschreibung und zentrale Ergebnisse
+
+Dieses Dokument liefert einen Überblick über die Ergebnisse der Studie zu Wohlbefinden, Arbeitsalltag und sozialen Medien der [Juniorprofessur für Kommunikationswissenschaften](https://www.kommunikationswissenschaft.rw.fau.de) ([Prof. Dr. Adrian Meier)](https://www.kommunikationswissenschaft.rw.fau.de/prof-dr-adrian-meier/) an der FAU Erlangen-Nürnberg.
+
+Das Ziel der Studie war, die Zusammenhänge von Wohlbefinden, Prokrastination (= Aufschiebung von Arbeit), Arbeitsalltag und Social Media-Nutzung besser zu verstehen und daraus, insbesondere zur Arbeit im Homeoffice und im Büro, Empfehlungen für Berufstätige ableiten zu können. Dabei wurde die Experience-Sampling-Methode (ESM) angewendet: die Teilnehmer:innen erhielten über einen Zeitraum von zehn Arbeitstagen täglich zwischen 9 und 19 Uhr sechs Kurzfragebögen (ca. eine Minute Bearbeitungszeit pro Fragebogen). Diese Kurzfragebögen enthielten jeweils nur wenige Fragen zum aktuellen Wohlbefinden, dem Arbeitstag und der täglichen Social Media-Nutzung.
+
+::: callout-note
+## Zentrale Ergebnisse
+
+-   Die Teilnehmer:innen berichteten eine ausgeprägte Nutzung vieler verschiedener sozialer Medien, wobei ein nicht zu vernachlässigender Teil der Nutzungszeit auf Kollaborationstools (bspw. MS Teams, Zoom, Slack) fiel. Im Homeoffice wurden deutlich mehr Kollaborationstools genutzt als im Büro. Auch private soziale Medien (bspw. Facebook, Instagram, WhatsApp) wurden im Homeoffice mehr genutzt, allerdings ist hier der Unterschied zwischen den Arbeitsorten geringer.
+-   Die Nutzung des Homeoffice war über die Befragten und verschiedene Berufsgruppen unterschiedlich ausgeprägt. Im Schnitt gaben die Befragten in der Vorbefragung an, in einer typischen Woche drei Tage im Homeoffice zu arbeiten. In den Kurzfragebögen zeigte sich die große Beliebtheit des Homeoffice ebenfalls, hier war das Homeoffice vor dem Büro der häufigste aktuelle Aufenthaltsort.
+-   Im Homeoffice wurde mehr prokrastiniert als im Büro. Wurde im Homeoffice gearbeitet, fiel der Zusammenhang zwischen der Social Media-Nutzung und der Prokrastination negativ aus, im Büro war der Zusammenhang positiv. Insgesamt hing mehr Social-Media-Nutzung mit etwas höherer Prokrastination zusammen.
+-   Es lag kein Unterschied im allgemeinen Wohlbefinden der Befragten zwischen Arbeitssituationen im Büro und im Homeoffice vor. Ebenso hatte auch die Nutzungszeit sozialer Medien keinen Einfluss auf das Wohlbefinden. Die Teilnehmer:innen berichteten eher geringe Niveaus von Ermüdung, Stress, und Einsamkeit, wobei ebenfalls keine oder nur sehr geringe Unterschiede zwischen der Arbeit im Homeoffice oder dem Büro berichtet wurden.
+:::
+
+## Stichprobenbeschreibung
+
+Am ESM-Teil der Studie haben `r length(unique(esm_long$serial))` Personen teilgenommen. Die Kurzfragebögen bezogen sich jeweils auf die letzte Stunde und enthielten Fragen zu dem allgemeinen und situativen Wohlbefinden, dem Prokrastinationsverhalten, der Dauer sowie dem Automatisierungsgrad der Nutzung sozialer Medien, dem (hauptsächlichen) Aufenthaltsort sowie dem Anteil der Arbeitszeit. In diesem Abschnitt soll zunächst die Stichprobe an befragten Personen näher beschrieben werden.
+
+```{r fig age_pyramide}
+# #| label: fig-Alterspyramide
+# #| fig-cap: "Alterspyramide der Teilnehmer:innen (nach Geschlecht)"
+
+# Source: https://epirhandbook.com/en/demographic-pyramids-and-likert-scales.html#apyramid-package
+
+esm_wide %>% 
+  rename(., Geschlecht = gender_dicho_fct) %>% # Umbenennung für Legende
+  apyramid::age_pyramid(
+    age_group = "age_grp_fct", 
+    split_by = "Geschlecht",
+    # proportional = TRUE,
+    show_midpoint = FALSE,
+    pal = c("#a4b9ea", "#becfff")) +
+  labs(
+    title = "**Alterspyramide der Teilnehmer:innen nach Geschlecht**",
+    x = "Alter",
+    y = "Anzahl der Personen",
+    fill = "") +
+  theme(
+    plot.title = element_markdown())
+
+# Optional: In Prozent
+# esm_wide %>% 
+#   rename(., Geschlecht = gender_dicho_fct) %>% # Umbenennung für Legende
+#   apyramid::age_pyramid(
+#     age_group = "age_grp_fct",
+#     split_by = "Geschlecht",
+#     proportional = TRUE) +
+#   labs(x = "Alter", y = "Anteil in %")
+```
+
+Das Alter der Teilnehmer:innen betrug im Schnitt `r round(mean(esm_wide$age, na.rm = TRUE),0)` Jahre (SD = `r round(sd(esm_wide$age, na.rm = TRUE), 0)`). Insgesamt überwogen die weiblichen Teilnehmerinnen (`r round((nrow(esm_wide %>% filter(gender ==1)))/nrow(esm_wide),2)*100`%), besonders deutlich wird der Unterschied in den jüngeren Altersgruppen (unter 40 Jahren). Eine Person wollte keine Angabe zum Geschlecht machen.
+
+```{r working_hours_figure}
+# #| label: fig-arbeitszeit
+# #| fig-cap: "Arbeitszeitbeginn und -ende"
+
+working24 <- esm_long %>% 
+  distinct(serial, .keep_all = TRUE) %>% 
+  frq(working_hours_begin, working_hours_end) %>% 
+  as.data.frame() %>% 
+  filter(!is.na(val)) %>% 
+  mutate(across(variable, ~case_when(
+    variable == "working_hours_begin" ~ "begin",
+    variable == "working_hours_end" ~ "end"
+  ))) %>% 
+  pivot_wider(id_cols = val, names_from = variable, values_from = frq) %>% 
+  rename(hour = val) %>% 
+  arrange(hour)
+
+hours24 <- tibble(hour = 0:23) %>% 
+  arrange(hour) %>% 
+  left_join(working24, by = "hour") %>%
+  pivot_longer(cols = begin:end, names_to = "vars", values_to = "n")
+
+
+# Inspired by:
+# https://r-graph-gallery.com/web-circular-barplot-with-R-and-ggplot2.html
+# https://www.azandisresearch.com/2019/07/19/create-a-radial-mirrored-barplot-with-ggplot/
+
+# Replace default theme 
+theme_set(theme_minimal())
+
+## Create graph
+hours24 %>% 
+  mutate(across(hour, as.factor)) %>% 
+  # Basic radar chart
+  ggplot(aes(hour, n, fill = vars)) +
+  geom_col(show.legend = TRUE) +
+  geom_label(
+    aes(label = n, color = vars),
+    fill = "white",
+    alpha = 0.8) +
+  coord_polar(start = -0.131) +
+  labs(title = "Beginn und Ende der Arbeitszeit",
+       subtitle = "Anzahl der Personen; nach Tageszeit (0 bis 24h)") +
+  # Add annotations 
+  ## Custom label for legend
+  #scale_fill_discrete(name = "", labels = c("Work hours: Begin", "Work hours: End")) +
+  ## Custom colours
+  scale_color_manual(
+    values = c("#04316a", "#c50f3c"), guide = "none") +
+  scale_fill_manual(
+    values = c("#04316a", "#c50f3c"),
+    name = "",
+    labels = c("Beginn", "Ende")) +
+  ## Annotate custom scale inside plot
+  annotate(x = 1.15, y = 0, label = "0", geom = "text", color = "grey25") +
+  annotate(x = 1.15, y = 50, label = "50", geom = "text", color = "grey25") +
+  annotate(x = 1.15, y = 100,label = "100",geom = "text", color = "grey25") +
+  ## Scale y axis so bars don't start in the center
+  scale_y_continuous(
+    limits = c(-50, 125),
+    expand = c(0, 0),
+    breaks = c(0, 25, 50, 75, 100, 125)
+  ) +
+  theme_minimal() +
+  ## Customize general theme
+  theme(
+    # Remove axis ticks and text
+    axis.title = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text.y = element_blank(),
+    axis.text.x = element_text(size = 10),
+    # Change text size for the hour names
+    ## axis.text.x = element_text(size = 12))
+    # Set default color and font family for the text
+    text = element_text(color = "gray12"),
+    # Customize the text in the title, subtitle, and caption
+    plot.title = element_text(face = "bold", hjust = 0.05),
+    plot.subtitle = element_text(hjust = 0.05),
+    plot.caption = element_text(size = 10, hjust = .5),
+        # Make the background white and remove extra grid lines
+    panel.background = element_rect(fill = "white", color = "white"),
+    panel.grid = element_line(color = "grey80"),
+    panel.grid.minor.x = element_blank(),
+    # Move the legend to the bottom
+    legend.position = "top"
+  ) 
+
+# Change back to default theme
+theme_set(theme_pubr())
+```
+
+```{r working_hours_tbl}
+# #| label: tbl-working_hours
+# #| tbl-cap: "Arbeitszeit: Stunden, Beginn und Ende"
+
+esm_long %>% 
+  distinct(serial, .keep_all = TRUE) %>% 
+  descr(working_hours, working_hours_begin, working_hours_end) %>%
+  select(var, n, mean, sd, se, md, range) %>% 
+    mutate(
+    across(var, ~case_when(
+      var == "working_hours" ~ "Ich arbeite___Stunden pro Woche.",
+      var == "working_hours_begin" ~ "Ich beginne meine Arbeit meist um:",
+      var == "working_hours_end" ~ "Ich beende meine Arbeit meist um:",
+      TRUE ~ var))) %>% 
+  gt() %>%
+  tab_header(
+    # title = "Working Hours: Total, Beginning and End",
+    title = "Informationen über den Arbeitsalltag",
+    subtitle = "Anzahl der Stunden, Beginn und Ende") %>% 
+  cols_label(
+    var = "",
+    mean = "Mittelwert"
+    ) %>%
+  fmt_number(
+    columns = c(mean:range), 
+    decimals = 2
+    ) %>% 
+  tab_footnote(
+    footnote = 
+      md("Frage: *Wie viele Stunden arbeiten Sie in einer typischen Woche? Damit ist Ihre tatsächliche Arbeitszeit gemeint, nicht Ihre Arbeitszeit laut Arbeitsvertrag. Sollten Sie mehrere Jobs ausüben, geben Sie bitte die Summe der gearbeiteten Stunden in allen Jobs an.*"),
+    locations = cells_body(columns = 1, rows = 1)
+    ) %>% 
+    tab_footnote(
+    footnote = 
+      md("Frage: *An einem typischen Wochentag, wann beginnen Sie und wann beenden Sie Ihren Arbeitstag? Bitten runden Sie Beginn und Ende Ihrer Arbeitszeit auf die volle Stunde auf.*"),
+    locations = cells_body(columns = 1, rows = 2:3)
+    ) %>% 
+  gt_theme_nytimes() %>% 
+  tab_options(table.width = pct(100))
+```
+
+```{r working_begin_end, echo=FALSE}
+# hour value of the average working begin
+hour_start <- floor(esm_long %>% distinct(serial, .keep_all = TRUE) %>%
+                      pull(working_hours_begin) %>% mean(na.rm = TRUE))
+# minute value of the average working begin
+minute_start <- ((esm_long %>% distinct(serial, .keep_all = TRUE) %>%
+                    pull(working_hours_begin) %>% mean(na.rm = TRUE)) - hour_start) * 60 
+
+# hour value of the average working end
+hour_end <- floor(esm_long %>% distinct(serial, .keep_all = TRUE) %>% pull(working_hours_end) %>% mean(na.rm = TRUE))
+# minute value of the average working begin
+minute_end <- ((esm_long %>% distinct(serial, .keep_all = TRUE) %>% pull(working_hours_end) %>% mean(na.rm = TRUE)) - hour_end) * 60 
+
+# average working hours
+work_hours_avg <- round(mean((esm_wide$working_hours_end - esm_wide$working_hours_begin), 
+                       na.rm =TRUE),2)
+work_hours_sd <- round(sd((esm_wide$working_hours_end - esm_wide$working_hours_begin), 
+                       na.rm =TRUE),2)
+
+# hour value of the average working hours
+hour_avg <- floor(work_hours_avg)
+# minute value of the average working hours
+minute_avg <- (work_hours_avg-hour_avg)*60
+
+```
+
+Die meisten Teilnehmer:innen arbeiteten während der üblichen Arbeitszeiten. `r round((esm_wide %>% filter(working_hours_begin %in% c(7:9)) %>% nrow())/(esm_wide %>% nrow()),2)*100`% der Teilnehmer:innen begannen ihren Arbeitstag zwischen 7 und 9 Uhr, für `r round((esm_wide %>% filter(working_hours_end %in% c(16:18)) %>% nrow())/(esm_wide %>% nrow()),2)*100`% endete der Arbeitstag zwischen 16 und 18 Uhr. Im Schnitt arbeiteten die Teilnehmer:innen `r round(esm_long %>% distinct(serial, .keep_all = TRUE) %>% pull(working_hours) %>% mean(na.rm = TRUE),2)` Stunden in der Woche (SD = `r round(esm_long %>% distinct(serial, .keep_all = TRUE) %>% pull(working_hours) %>% sd(na.rm = TRUE),2)`). Im Durchschnitt begannen sie dabei um `r format(as.POSIXct(paste(hour_start, minute_start, sep = ":"), format = "%H:%M"), "%H:%M")` Uhr (SD = `r round(esm_long %>% distinct(serial, .keep_all = TRUE) %>% pull(working_hours_begin) %>% sd(na.rm = TRUE),2)`) mit der Arbeit und beendeten diese um `r format(as.POSIXct(paste(hour_end, minute_end, sep = ":"), format = "%H:%M"), "%H:%M")` Uhr (SD = `r round(esm_long %>% distinct(serial, .keep_all = TRUE) %>% pull(working_hours_end) %>% sd(na.rm = TRUE),2)`). Damit lag die durchschnittliche tägliche Arbeitszeit bei `r format(as.POSIXct(paste(hour_avg, minute_avg, sep = ":"), format = "%H:%M"), "%H:%M")` Stunden (SD = `r work_hours_sd`).
+
+```{r fig homeoffice_occupation}
+# #| label: fig-Homeoffice-by-Beruf
+# #| fig-cap: "Anteil der Tagen im Homeoffice nach Beruf"
+
+# esm_wide %>% 
+#   # transformation
+#   mutate(
+#     across(homeoffice_days, as.factor)) %>% 
+#   # create plot
+#   ggplot(aes(fct_infreq(occupation_grp_fct), group = homeoffice_days, fill = homeoffice_days)) +
+#   geom_bar() + 
+#   labs(x = "Berufe", y = "Häufigkeit") +
+#   scale_fill_brewer(palette = "Blues", name = "Anzahl der Tage im Homeoffice in einer typischen Woche") +
+#   scale_x_discrete(guide = guide_axis(n.dodge = 2)) 
+
+# Create custom label (percentage and absolute number)
+## create data frame
+gg_label_data <- esm_wide %>% 
+  select(occupation_grp_fct) %>%
+  group_by(occupation_grp_fct) %>% 
+  summarise(n = n()) %>% 
+  arrange(desc(n))
+
+## export labels
+gg_labels <- paste0("**", gg_label_data$occupation_grp_fct, "**", "<br>", "(n=", gg_label_data$n, ")")
+
+
+# Create GRPAH
+esm_wide %>% 
+  # transformation
+  mutate(across(homeoffice_days, as.factor)) %>% 
+  # create plot
+  ggplot(aes(fct_infreq(occupation_grp_fct), fill = forcats::fct_rev(homeoffice_days))) +
+  geom_bar(position = "fill") + 
+  labs(
+    title = "**Anteil der Tage im Homeoffice unterschieden nach Beruf**",
+    x = "",
+    y = "") +
+  scale_fill_brewer(
+    palette = "Blues",
+    name = "Tage im Homeoffice in einer typischen Woche",
+    direction = -1) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2), labels = gg_labels) +
+  theme(
+    axis.text.x = element_markdown(),
+    plot.title = element_markdown()
+  )
+```
+
+Etwa zwei Drittel der Teilnehmer:innen waren Angestellte (`r round((nrow(esm_wide %>% filter(occupation_grp ==4)))/nrow(esm_wide),2)*100`%), `r round((nrow(esm_wide %>% filter(occupation_grp ==5)))/nrow(esm_wide),2)*100`% waren verbeamtet, `r round((nrow(esm_wide %>% filter(occupation_grp ==2)))/nrow(esm_wide),2)*100`% studierten und `r round((nrow(esm_wide %>% filter(occupation_grp ==6)))/nrow(esm_wide),2)*100`% waren selbstständig. Nur `r round((nrow(esm_wide %>% filter(occupation_grp ==5)))/nrow(esm_wide),2)*100`% befanden sich zum Zeitpunkt der Befragung in der Ausbildung, `r round((nrow(esm_wide %>% filter(occupation_grp ==10)))/nrow(esm_wide),2)*100`% waren anderweitig beschäftigt.
+
+Die Teilnehmer:innen verbrachten in einer typischen Woche durchschnittlich `r round(mean(esm_wide$homeoffice_days, na.rm = TRUE),2)` Tage im Homeoffice (SD = `r round(sd(esm_wide$homeoffice_days, na.rm = TRUE),2)`). Zwar ließen sich Unterschiede zwischen den verschiedenen Berufen beobachten, diese fielen im Mittel allerdings relativ gering aus.
+
+```{r fig number sm_apps}
+# #| label: fig-Social Media Apps
+# #| fig-cap: "Anzahl der mindestens einmal pro Woche genutzten sozialen Medien"
+
+esm_wide %>% 
+  # transformation
+  mutate(across(sm_apps, as.factor)) %>% 
+  # create graph
+  ggplot(aes(sm_apps)) +
+  geom_bar(fill = "#04316a") + 
+  labs(
+    title = "**Anzahl der mindestens einmal pro Woche genutzten sozialen Medien**",
+    x = "Anzahl",
+    y = "Häufigkeit") +
+  theme(
+    plot.title = element_markdown()
+  )
+```
+
+```{r data sm_usage }
+#| echo: false
+
+sm <- list(
+  n = esm_wide %>% 
+    summarise(across(fb:other_sm, sum)) %>% 
+    pivot_longer(cols = everything(), names_to = "sm", values_to = "n"),
+  top3 = esm_wide %>% 
+    select(sm_top3_fb_pre:sm_top3_other_pre) %>% 
+    mutate(across(everything(), ~replace_na(., FALSE))) %>% 
+    summarise(across(sm_top3_fb_pre:sm_top3_other_pre, sum)) %>% 
+    pivot_longer(cols = everything(), names_to = "sm", values_to = "top3") %>% 
+    mutate(
+      across(sm, ~str_replace(., "sm_top3_", "")),
+      across(sm, ~str_replace(., "_pre", "")), 
+      across(sm, ~case_when(
+        sm == "yt" ~ "youtube", 
+        sm == "insta" ~ "instagram", 
+        sm == "wa" ~ "whatsapp", 
+        sm == "fbm" ~ "fb_messenger", 
+        sm == "pint" ~ "pinterest", 
+        sm == "link" ~ "linkedin", 
+        sm == "twit" ~ "twitter", 
+        sm == "sig" ~ "signal", 
+        sm == "tel" ~ "telegram", 
+        sm == "threm" ~ "threema", 
+        sm == "snap" ~ "snapchat", 
+        sm == "tik" ~ "tiktok", 
+        sm == "red" ~ "reddit",
+        sm == "tumb" ~ "tumblr",
+        sm == "other" ~ "other_sm",
+        TRUE ~ sm))),
+  top3_time_mean = esm_wide %>% 
+    select(facebook_time_num_pre:other_sm_time_num_pre) %>%
+    pivot_longer(
+      cols = everything(),
+      names_to = "sm",
+      values_to = "top3_time_mean") %>% 
+    filter(!is.na(top3_time_mean)) %>% 
+    group_by(sm) %>% 
+    summarise(across(top3_time_mean, mean)) %>% 
+    mutate(
+      across(sm, ~case_when(
+        sm == "facebook_time_num_pre" ~ "fb",
+        sm == "youtube_time_num_pre" ~ "youtube", 
+        sm == "instagram_time_num_pre" ~ "instagram", 
+        sm == "whatsapp_time_num_pre" ~ "whatsapp", 
+        sm == "fbmessenger_time_num_pre" ~ "fb_messenger", 
+        sm == "pinterest_time_num_pre" ~ "pinterest", 
+        sm == "linkedin_time_num_pre" ~ "linkedin",
+        sm == "xing_time_num_pre" ~ "xing",
+        sm == "twitter_time_num_pre" ~ "twitter", 
+        sm == "signal_time_num_pre" ~ "signal", 
+        sm == "telegram_time_num_pre" ~ "telegram", 
+        sm == "threema_time_num_pre" ~ "threema", 
+        sm == "snapchat_time_num_pre" ~ "snapchat", 
+        sm == "tiktok_time_num_pre" ~ "tiktok", 
+        sm == "reddit_time_num_pre" ~ "reddit",
+        sm == "tumblr_time_num_pre" ~ "tumblr",
+        sm == "other_sm_time_num_pre" ~ "other_sm",
+        TRUE ~ sm))),
+  top3_groups = esm_wide %>% 
+    select(facebook_time_pre:other_sm_time_pre) %>%
+    rec(facebook_time_pre:other_sm_time_pre,
+        rec = "1:2=1; 3:4=2; 5:9=3") %>% 
+    select(ends_with("_r")) %>% 
+    melt()  %>% 
+    rename(sm = variable, cat = value) %>% 
+    filter(!is.na(cat)) %>%  
+    group_by(sm, cat) %>% 
+    summarise(n = n(), .groups = "drop") %>% 
+    group_by(sm) %>% 
+    summarise(top3_values = list(n)) %>% 
+    mutate(
+      across(sm, ~case_when(
+        sm == "facebook_time_pre_r" ~ "fb",
+        sm == "youtube_time_pre_r" ~ "youtube", 
+        sm == "instagram_time_pre_r" ~ "instagram", 
+        sm == "whatsapp_time_pre_r" ~ "whatsapp", 
+        sm == "fbmessenger_time_pre_r" ~ "fb_messenger", 
+        sm == "pinterest_time_pre_r" ~ "pinterest", 
+        sm == "linkedin_time_pre_r" ~ "linkedin",
+        sm == "xing_time_pre_r" ~ "xing",
+        sm == "twitter_time_pre_r" ~ "twitter", 
+        sm == "signal_time_pre_r" ~ "signal", 
+        sm == "telegram_time_pre_r" ~ "telegram", 
+        sm == "threema_time_pre_r" ~ "threema", 
+        sm == "snapchat_time_pre_r" ~ "snapchat", 
+        sm == "tiktok_time_pre_r" ~ "tiktok", 
+        sm == "reddit_time_pre_r" ~ "reddit",
+        sm == "tumblr_time_pre_r" ~ "tumblr",
+        sm == "other_sm_time_pre_r" ~ "other_sm")))
+)
+    
+```
+
+Knapp 60% der Teilnehmer:innen verwendet regelmäßig zwischen drei und fünf Social Media Apps mindestens einmal pro Woche. Nur etwa ein Viertel der Personen gab an, mindestens sechs Apps regelmäßig zu verwenden.
+
+```{r tab sm_usage }
+#| column: page
+# #| label: tbl-sm_apps_presurvey
+# #| tbl-cap: "Nutzung und Beliebtheit verschiedener Social Media Apps"
+
+# Create output
+sm_full <- Reduce(function(x, y) left_join(x, y, by = "sm"), sm) %>% 
+  mutate(
+    n_prop = n/length(unique(esm_wide$serial)),
+    top3_prop = top3/n, 
+    n_perc = round(n_prop*100, 2),
+    top3_perc = round(top3_prop*100, 2),
+    across(top3_time_mean, ~round(.,0)),
+    across(sm, ~case_when(
+      sm == "fb" ~ "Facebook",
+      sm == "youtube" ~ "YouTube", 
+      sm == "instagram" ~ "Instagram", 
+      sm == "whatsapp" ~ "WhatsApp", 
+      sm == "fb_messenger" ~ "Facebook Messenger", 
+      sm == "pinterest" ~ "Pinterest", 
+      sm == "linkedin" ~ "LinkedIn",
+      sm == "xing" ~ "Xing",
+      sm == "twitter" ~ "Twitter", 
+      sm == "signal" ~ "Signal", 
+      sm == "telegram" ~ "Telegram", 
+      sm == "threema" ~ "Threema", 
+      sm == "snapchat" ~ "Snapchat", 
+      sm == "tiktok" ~ "TikTok", 
+      sm == "reddit" ~ "Reddit",
+      sm == "tumblr" ~ "Tumblr",
+      sm == "other_sm" ~ "Other",
+      TRUE ~ sm) 
+    )) %>% 
+  relocate(!top3_values)
+
+# Create table
+sm_full %>% 
+  arrange(desc(n)) %>% 
+  select(!contains("_prop") & !ends_with("_mean")) %>% 
+  gt() %>% 
+  gt_plt_bar_stack(
+    column = top3_values,
+    palette = c("#677BBD", "#92A4EA", "#BECFFF"), #  blues
+
+    labels = c("< 30 min. ", " 31 bis 90 min. ", " > 90 min. " )) %>% 
+  tab_header(
+     title = "Nutzung und Beliebtheit verschiedener Social Media Apps"
+  ) %>% 
+  tab_spanner(
+    label = "Tägliche Nutzung Top 3",
+    columns = top3_values,
+  ) %>% 
+  cols_label(
+    sm = "Social Media App",
+    top3 = "Top 3",
+    n_perc = html("% <sub>n</sub>"),
+    top3_perc = html("% <sub>Top 3</sub>")
+  ) %>% 
+  cols_move(
+    columns = top3,
+    after = n_perc
+  ) %>% 
+  # fmt_percent(
+  #    columns = n_prop:top3_prop
+  # ) %>% 
+  tab_footnote(
+    footnote = md("Frage: *Bitte wählen Sie alle sozialen Medien aus, die Sie mindestens einmal in der Woche nutzen. Wenn Sie überhaupt keine sozialen Medien nutzen, wählen Sie die letzte Antwortmöglichkeit aus.*"),
+    locations = cells_column_labels(columns = n)
+  ) %>% 
+  tab_footnote(
+    footnote = md("Frage: *Welche der zu Beginn des Fragebogens von Ihnen ausgewählten sozialen Medien nutzen Sie im Alltag am häufigsten? Bitte wählen Sie max. drei soziale Medien aus, die Sie am häufigsten nutzen. Sie können auch weniger als drei Medien auswählen.*"),
+    locations = cells_column_labels(columns = top3)
+  ) %>%
+  tab_footnote(
+    footnote = md("Frage: *An einem durchschnittlichen Tag in den letzten zwei Wochen: Wie viel Zeit haben Sie auf diesen sozialen Medien verbracht? Bitte denken Sie dabei an die gesamte Nutzung über alle Endgeräte (Smartphone, Laptop, Desktop-PC, Tablet). Im Durchschnitt verbrachte ich an einem Tag auf...*"),
+    locations = cells_column_labels(columns = top3_values)
+  ) %>% 
+  gt_plt_bar_pct(column = n_perc, fill =  "#04316a", scaled = TRUE) %>% 
+  gt_plt_bar_pct(column = top3_perc, fill = "#3C5493", scaled = TRUE) %>%
+  cols_width(
+    n_perc ~ px(100),
+    top3_perc ~ px(100)) %>% 
+  gt_theme_nytimes() 
+```
+
+Bei genauerer Betrachtung der regelmäßig genutzten Apps sticht besonders die Dominanz von Whatsapp heraus. Nicht nur gaben `r round(sum(esm_wide$whatsapp)/nrow(esm_wide)*100,0)` der Teilnehmer:innen an, Whatsapp regelmäßig zu nutzen, für etwas über 80% der dieser Personen zählt es zudem zu den drei am häufigsten genutzten Social Media Apps.
+
+Ebenfalls beliebt sind YouTube, das von `r round(sum(esm_wide$youtube)/nrow(esm_wide)*100,0)`% der Teilnehmer:innen genutzt wird, sowie Instagram, beim dem knapp über die Hälfte der Teilnehmer:innen eine regelmäßige Nutzung angaben.
+
+## Situationsbeschreibung
+
+Dieser Abschnitt konzentriert sich auf die Präsentation von Auswertungen, die auf den Daten der Kurzfragebögen (im weiteren Verlauf mit `T` gekennzeichnet) basieren.
+
+```{r}
+# #| label: fig-wellbeing
+# #| fig-cap: "Allgemeines Wohlbefinden"
+
+
+esm_long %>%
+  # transformation
+  mutate(across(wellbeing, as.factor)) %>% 
+  filter(!is.na(wellbeing)) %>% 
+  # create graph
+  ggplot(aes(wellbeing, fill = wellbeing)) +
+  geom_bar() +
+  labs(
+    title = "**Wohlbefinden in der letzten Stunde**",
+    subtitle = " Skala von 0 (sehr schlecht) bis 10 (sehr gut)",
+    x = "",
+    y = "Häufigkeit"
+  ) +
+  scale_fill_brewer(palette = "RdYlGn") +
+  theme(
+    legend.position = "none",
+    plot.title = element_markdown())
+```
+
+Die meisten Teilnehmer:innen berichteten ein eher gutes bis sehr gutes situatives allgemeines Wohlbefinden (M = `r round(mean(esm_long$wellbeing, na.rm = TRUE),0)` , SD = `r round(sd(esm_long$wellbeing, na.rm = TRUE), 0)`)
+
+```{r fig location}
+# #| label: fig-location
+# #| fig-cap: "Aufenthaltsort"
+
+esm_long %>% 
+  filter(!is.na(location)) %>% 
+  dplyr::select(location) %>% 
+  group_by(location) %>% 
+  count() %>% 
+  ungroup() %>% 
+  mutate(pct = round(n/sum(n),2)*100) %>% 
+  ggplot(aes(fill = location, values = pct)) +
+  waffle::geom_waffle(
+    n_rows = 10, size = 0.5, 
+    colour = "grey25",
+    radius = grid::unit(0.25, "npc"), 
+    na.rm = TRUE) +
+  scale_fill_brewer(palette = "OrRd", direction = -1) +
+  # scale_fill_manual(
+  #   name = NULL,
+  #   values = c("#971B2F", "#C50F3C", "#D64839", "#EF5E4C", "#FFC0A5", "grey50")
+  #   ) +
+  coord_equal() +
+  theme_void() +
+  labs(
+    title = "**Wo haben Sie die meiste Zeit verbracht?**",
+    #subtitle = "Aufenthaltsort in Prozent (T = 8931)",
+    subtitle = "Aufenthaltsort in Prozent (T = 8.791)",
+    fill = "**Ich war vor allem …**"
+  ) +
+  theme(
+    plot.title = element_markdown(),
+    plot.subtitle = element_markdown(),
+    legend.title = element_markdown(),
+    legend.position = "left"
+  )
+```
+
+Der hauptsächliche Aufenthaltsort in der letzten Stunde war bei der ESM-Studie am häufigsten das Homeoffice (`r round(esm_long %>% filter(location_homeoffice == 1) %>% nrow()/esm_long %>% filter(!is.na(location)) %>% nrow(),2)*100`%), nur etwas ein Fünftel der Kurzfragebögen bezogen sich auf die Arbeit im Büro. Insgesamt überwogen die Anzahl der Arbeitssituationen (62%), gleichzeitig befanden sich die Teilnehmer:innen bei dem Großteil der Kurzfragebögen zu Hause (während und außerhalb der Arbeitszeit).
+
+```{r fig probes sm_usage }
+# #| label: fig-sm_usage_intesity
+# #| fig-cap: "Nutzungsintensität verschiedener Apps"
+
+# create data frame
+gg_label_data <- esm_long %>% 
+  select(collabtools_min:other_min) %>% 
+  pivot_longer(
+    cols = everything(), 
+    names_to = "sm_use",
+    values_to = "values"
+  ) %>% 
+  filter(values > 0) %>% 
+  group_by(sm_use) %>% 
+  summarise(n = n()) %>% 
+  mutate(
+    sm_use_num = case_when(
+      sm_use == "collabtools_min" ~ 1,
+      sm_use == "facebook_min" ~ 2,
+      sm_use == "insta_min" ~ 3,
+      sm_use == "messenger_min" ~ 4,
+      sm_use == "youtube_min" ~ 5,
+      sm_use == "other_min" ~ 6),
+    sm_use_fct = factor(
+      sm_use_num,
+      levels = c(1:6),
+      labels = c("Kollaborationstools","Facebook", "Instagram",
+                 "Messenger", "YouTube", "Andere"))
+  ) %>% 
+  arrange(desc(sm_use_num))
+
+# export labels
+gg_labels <- paste0("**", gg_label_data$sm_use_fct, "**", "<br>", "(T=", gg_label_data$n, ")")
+
+
+# GRAPH
+esm_long %>% 
+  select(collabtools_min:other_min) %>%
+  # transformation
+  pivot_longer(
+    cols = everything(), 
+    names_to = "sm_use",
+    values_to = "values"
+  ) %>% 
+  filter(values != 0) %>% 
+  mutate(
+    sm_use_num = case_when(
+      sm_use == "collabtools_min" ~ 1,
+      sm_use == "facebook_min" ~ 2,
+      sm_use == "insta_min" ~ 3,
+      sm_use == "messenger_min" ~ 4,
+      sm_use == "youtube_min" ~ 5,
+      sm_use == "other_min" ~ 6),
+    sm_use_fct = factor(
+      sm_use_num,
+      levels = c(1:6),
+      labels = c("Kollaborationstools","Facebook", "Instagram",
+                 "Messenger", "YouTube", "Andere")),
+    sm_use_fct_order = fct_reorder(sm_use_fct, sm_use_num)
+  ) %>% 
+  # Create graphs
+  ggplot(aes(x = values, y = (sm_use_fct_order), fill = sm_use_fct_order)) + 
+  geom_density_ridges(alpha = 0.6, scale = 3) +
+  scale_x_continuous(expand = c(0,0), limits = c(0,60)) +
+  scale_y_discrete(
+    limits = rev, 
+    labels = gg_labels) +
+  scale_fill_brewer(palette = "Reds", direction = -1) +
+  labs(
+    title = "Nutzungsintensität von Social Media Apps",
+    subtitle = "Nur aktive Nutzung (mindesteins eine Minute)",
+    x = "Minuten", 
+    y = "") +
+  theme_ridges() + 
+  theme(
+    legend.position = "none",
+    axis.text.y = element_markdown())
+```
+
+```{r means app usage, echo=FALSE}
+# hour value of the average use of sm use with collab tools
+hour_sm_sum <- floor(mean(esm_long$sm_sum_trunc, na.rm = TRUE))
+# minute value of the average sm use with collab tools
+minute_sm_sum <- round((mean(esm_long$sm_sum_trunc, na.rm = TRUE) - hour_sm_sum) * 60) 
+
+# hour value of the average use of sm use without collab tools
+hour_nocollab <- floor(mean(esm_long$sm_sum_nocollab_trunc, na.rm = TRUE))
+# minute value of the average sm use without collab tools
+minute_nocollab <- round((mean(esm_long$sm_sum_nocollab_trunc, na.rm = TRUE) - hour_nocollab) * 60) 
+
+# hour value of the average use of collab tools
+hour_collab <- floor(mean(esm_long$collabtools_min, na.rm = TRUE))
+# minute value of the average  use of collab tools
+minute_collab <- round((mean(esm_long$collabtools_min, na.rm = TRUE) - hour_collab) * 60) 
+
+# hour value of the average use of instagram
+hour_insta <- floor(mean(esm_long$insta_min, na.rm = TRUE))
+# minute value of the average  use of instagram
+minute_insta <- round((mean(esm_long$insta_min, na.rm = TRUE) - hour_insta) * 60) 
+
+# hour value of the average use of facebook
+hour_fb <- floor(mean(esm_long$facebook_min, na.rm = TRUE))
+# minute value of the average  use of facebook
+minute_fb <- round((mean(esm_long$facebook_min, na.rm = TRUE) - hour_fb) * 60) 
+
+# hour value of the average use of messenger apps
+hour_messenger <- floor(mean(esm_long$messenger_min, na.rm = TRUE))
+# minute value of the average  use of facebook
+minute_messenger <- round((mean(esm_long$messenger_min, na.rm = TRUE) - hour_messenger) * 60) 
+
+# hour value of the average use of youtube
+hour_yt <- floor(mean(esm_long$youtube_min, na.rm = TRUE))
+# minute value of the average  use of youtube
+minute_yt <- round((mean(esm_long$youtube_min, na.rm = TRUE) - hour_yt) * 60) 
+
+# hour value of the average use of other apps
+hour_other <- floor(mean(esm_long$other_min, na.rm = TRUE))
+# minute value of the average  use of other apps
+minute_other <- round((mean(esm_long$other_min, na.rm = TRUE) - hour_other) * 60) 
+
+
+
+# r format(as.POSIXct(paste(hour_start, minute_start, sep = ":"), format = "%H:%M"), "%H:%M")
+```
+
+In `r esm_long %>% filter(sm_sum_trunc > 0) %>% nrow()` Situationen (`r round(esm_long %>% filter(sm_sum_trunc > 0) %>% nrow()/esm_long %>% nrow()*100, )`% der gültigen Kurzfragebögen) berichteten die Teilnehmer:innen, dass sie in der letzten Stunde vor dem Ausfüllen der jeweiligen Kurzfragebogens soziale Medien (inklusive Kollaborationstools wie Teams) genutzt hatten. Im Schnitt verbrachten sie dabei nach eigenen Angaben eine beachtliche Dauer von `r format(as.POSIXct(paste(hour_sm_sum, minute_sm_sum, sep = ":"), format = "%M:%S"), "%M:%S")` Minuten (SD = `r round(sd(esm_long$sm_sum_trunc, na.rm = TRUE), 2)`, Median = `r round(median(esm_long$sm_sum_trunc, na.rm = TRUE), 2)`) auf Social Media Plattformen. Ohne Kollaborationstools sinkt die durchschnittliche Nutzungsdauer auf `r format(as.POSIXct(paste(hour_nocollab, minute_nocollab, sep = ":"), format = "%M:%S"), "%M:%S")` Minuten (SD = `r round(sd(esm_long$sm_sum_nocollab_trunc, na.rm = TRUE), 2)`, Median = `r round(median(esm_long$sm_sum_nocollab_trunc, na.rm = TRUE), 2)`) pro Stunde.
+
+Betrachtet man die einzelnen App-Gruppen, verbrachten die Teilnehmer:innen in der letzten Stunde vor einer ESM-Befragung im Schnitt `r format(as.POSIXct(paste(hour_collab, minute_collab, sep = ":"), format = "%M:%S"), "%M:%S")` Minuten (SD = `r round(sd(esm_long$collabtools_min, na.rm = TRUE), 2)`) mit der Nutzung von Kollaborationstools, `r format(as.POSIXct(paste(hour_insta, minute_insta, sep = ":"), format = "%M:%S"), "%M:%S")` Minuten (SD = `r round(sd(esm_long$insta_min, na.rm = TRUE), 2)`) auf Instagram , `r format(as.POSIXct(paste(hour_fb, minute_fb, sep = ":"), format = "%M:%S"), "%M:%S")` Minuten (SD = `r round(sd(esm_long$facebook_min, na.rm = TRUE), 2)`) auf Facebook, `r format(as.POSIXct(paste(hour_messenger, minute_messenger, sep = ":"), format = "%M:%S"), "%M:%S")` Minuten (SD = `r round(sd(esm_long$messenger_min, na.rm = TRUE), 2)`) mit Messenger Apps, `r format(as.POSIXct(paste(hour_yt, minute_yt, sep = ":"), format = "%M:%S"), "%M:%S")` Minuten (SD = `r round(sd(esm_long$youtube_min, na.rm = TRUE), 2)`) mit YouTube und `r format(as.POSIXct(paste(hour_other, minute_other, sep = ":"), format = "%M:%S"), "%M:%S")` Minuten (SD = `r round(sd(esm_long$other_min, na.rm = TRUE), 2)`) auf anderen Plattformen. Selbstverständlich sind dies Durchschnittswerte, dies beschreibt nicht eine "typische" Nutzungssituation.
+
+```{r tab probes avs}
+esm_avs <- 
+  list(
+    stats = esm_long %>%
+      # Select variables
+      select(
+        wellbeing, 
+        # idx_affect,
+        idx_fatigue, # fatigue1, fatigue2, fatigue3,
+        idx_stress, # stress1, stress2,
+        idx_lonely, # lonely1, lonely2,
+        idx_procra, # procra_onset, procra_sustain
+        ) %>% 
+      # Create basic statistics 
+      summarise(
+        across(everything(),
+               list(
+                 n = ~sum(!is.na(.x)), 
+                 mean = ~mean(.x, na.rm = TRUE),
+                 sd = ~sd(.x, na.rm = TRUE)), 
+                 .names = "{.col}-{.fn}")) %>% 
+      pivot_longer(
+        cols = everything(),
+        names_to = "var",
+        values_to = "value") %>% 
+      separate(var, into = c("var", "stat"), sep = "-") %>% 
+      pivot_wider(
+        id_cols = var, 
+        names_from = "stat", 
+        values_from = "value")
+    ,
+    stats_by_location = esm_long %>%
+      # Select variables
+      select(
+        location_work, location_homeoffice, location_office,
+        wellbeing, 
+        # idx_affect,
+        idx_fatigue, # fatigue1, fatigue2, fatigue3,
+        idx_stress, # stress1, stress2,
+        idx_lonely, # lonely1, lonely2,
+        idx_procra, # procra_onset, procra_sustain
+        ) %>%
+      # Group by location
+      group_by(location_work, location_homeoffice, location_office) %>% 
+      summarise(
+        across(everything(),
+               list(
+                 n = ~sum(!is.na(.x)), 
+                 mean = ~mean(.x, na.rm = TRUE),
+                 sd = ~sd(.x, na.rm = TRUE)), 
+               .names = "{.col}-{.fn}"),
+        .groups = "drop") %>% 
+      mutate(
+        cat_location = case_when(
+          location_work == 0 & location_homeoffice == 0 & location_office == 0 ~ "no_work",
+          location_work == 1 & location_homeoffice == 0 & location_office == 1 ~ "office",
+          location_work == 1 & location_homeoffice == 1 & location_office == 0 ~ "homeoffice",
+          TRUE ~ NA)
+        # fct_location = factor(
+        #   location_cat, 
+        #   levels = c(0:2), 
+        #   labels = c("keine Arbeitszeit", "im Büro", "im Homeoffice"))
+      ) %>% 
+      filter(!is.na(cat_location)) %>% 
+      select(!starts_with("location_")) %>% 
+      relocate(cat_location) %>% 
+      pivot_longer(cols = !cat_location, names_to = "var", values_to = "value") %>%
+      separate(var, into = c("var", "stat"), sep = "-") %>% 
+      pivot_wider(id_cols = cat_location:var, names_from = "stat", values_from = "value") %>% 
+      pivot_wider(
+        id_cols = var,
+        names_from = "cat_location", names_glue = "{cat_location}_{.value}", 
+        values_from = c(n, mean, sd)) 
+    ,
+    values = esm_long %>%
+      select(
+        wellbeing, 
+        # idx_affect,
+        idx_fatigue, # fatigue1, fatigue2, fatigue3,
+        idx_stress, # stress1, stress2,
+        idx_lonely, # lonely1, lonely2,
+        idx_procra, # procra_onset, procra_sustain
+        ) %>% 
+      melt() %>% 
+      filter(!is.na(value)) %>%  
+      group_by(variable) %>% 
+      summarise(values = list(value)) %>% 
+      rename(var = variable)
+  )
+
+
+
+esm_avs_full <- Reduce(function(x, y) left_join(x, y, by = "var"), esm_avs) %>% 
+  # Correct variable arrangement for output
+  relocate(values, .after = sd) %>% 
+  relocate(starts_with("office"), .after = values) %>% 
+  relocate(starts_with("homeoffice"), .after = office_sd) %>% 
+  relocate(starts_with("no_work"), .after = homeoffice_sd) %>% 
+  # Edit variables to optimize the output
+  mutate(
+    # Fix decimal places
+    across(where(is.numeric), ~round(., 1)),
+    # fix variable names
+    across(var,
+           ~recode(., 
+                   wellbeing = "Allgemeines Wohlbefinden",
+                   # idx_affect = "Affektives Wohlbefinden (Index)",
+                   idx_fatigue = "Ermüdung (Index)",
+                   # fatigue1 = "müde",
+                   # fatigue2 = "erschöpft",
+                   # fatigue3 = "aktiv",
+                   idx_stress = "Stress (Index)",
+                   # stress1 = "gestresst", 
+                   # stress2 = "entspannt",
+                   idx_lonely = "Einsamkeit (Index)",
+                   # lonely1 = "einsam",
+                   # lonely2 = "isoliert",
+                   idx_procra = "Prokrastination (Index)",
+                   # procra_onset = "Prokra_Onset",
+                   # procra_sustain = "Prokra_Sustain"
+                   ))
+  )
+
+
+esm_avs_full %>% 
+  select(!ends_with("_n")) %>% 
+  gt() %>%
+  # Add title and subtitle
+  tab_header(
+    "Übersicht über zentrale abhängige Variablen",
+    subtitle = "Mittelwert (Standartabweichung)"
+    ) %>% 
+  # Add table spanner
+  tab_spanner(
+    label = md("**Gruppiert nach Ort**"), 
+    columns = c(office_mean:no_work_sd)
+  ) %>%
+  # Merge columns 
+  cols_merge(
+    columns = c(mean, sd),
+    pattern = "{1}<< ({2})>>") %>% 
+  cols_merge(
+    columns = starts_with("office_"),
+    pattern = "{1}<< ({2})>>") %>% 
+  cols_merge(
+    columns = starts_with("homeoffice_"), 
+    pattern = "{1}<< ({2})>>") %>% 
+  cols_merge(
+    columns = starts_with("no_work_"),
+    pattern = "{1}<< ({2})>>") %>% 
+  # Change column labels
+  cols_label(
+    var = md(""),
+    n = md("T"),
+    mean = md("**Total** <br> (T = 8.791)"),
+    values = md("**Verteilung**"), 
+    office_mean = md("**Büro** <br> (T = 1.794)"),
+    homeoffice_mean = md("**Homeoffice** <br> (T = 3.720)"),
+    no_work_mean = md("**Anderer** <br> (T = 3.277)")
+   
+  ) %>% 
+  # tab_style(
+  #   style = cell_text(style = "italic"),
+  #   locations = cells_body(rows = c(2:3,7,10,13))
+  # ) %>% 
+  tab_footnote(
+    footnote = 
+      md("T = Anzahl der Situationen (Kurzfragebögen)"),
+    ) %>% 
+  tab_footnote(
+    footnote = 
+      md("Skala von 0 (sehr schlecht) bis 10 (sehr gut)"),
+    locations = cells_body(columns = 1, rows = 1)
+  ) %>%
+  tab_footnote(
+    footnote = 
+      md("Skala von 1 (gar nicht) bis 7 (sehr)"),
+    locations = cells_body(columns = 1, rows = 2:5)
+  ) %>%
+  gt_plt_dist(values, type = "histogram", bw = 1, fill_color = "#C50F3C") %>% 
+  gt_theme_nytimes()
+```
+
+Mit Blick auf das relativ hohe allgemeine Wohlbefinden verwundert es wenig, dass die abgefragten Indikatoren zur Überprüfung der situativen psychischen Belastung gering bis mittelmäßig ausgeprägt sind. So berichten die Teilnehmer:innen eine mittleres Level an Ermüdung und Stress sowie geringe Level an Einsamkeit und Prokrastination.
+
+```{r fig av items}
+#| fig-height: 10
+# #| label: fig-idx_affect
+# #| fig-cap: "Items Aktives Wohlbefinden"
+
+# COLUMN MIDDLE: LIKERT PLOT 
+esm_long %>%
+  # transformation
+  select(fatigue1, fatigue2, fatigue3, stress1, stress2, lonely1, lonely2) %>%
+  mutate(across(c(fatigue3, stress2), rec, rec = "rev")) %>%
+  rename(
+    müde = fatigue1,
+    erschöpft = fatigue2,
+    aktiv = fatigue3,
+    gestresst = stress1,
+    entspannt = stress2,
+    einsam = lonely1,
+    isoliert = lonely2
+  ) %>%
+  plot_likert_manual(
+    #title = "Fühlen Sie sich jetzt gerade ...?",
+    c(rep("Ermüdung", 3), rep("Stress", 2), rep("Einsamkeit", 2)),
+    legend.labels = 
+      c("1 = gar nicht", "2", "3", "4 = teilweise", "5", "6", "7 = sehr"), 
+    sort.groups = FALSE,
+    geom.size = 0.75,
+    catcount = 7,
+    values = "sum.outside",
+    show.prc.sign = TRUE,
+    digits = 0,
+    geom.colors = "Reds",
+    reverse.scale = TRUE,
+    expand.grid = TRUE,
+    legend.pos = "bottom", 
+    group.legend.options = list(nrow = 1)) +
+  labs(
+    title = "Fühlen Sie sich jetzt gerade ...?",
+    subtitle = "1 = gar nicht; 4 = teilweise; 7 = sehr"
+  #   y = "Anteile in %"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+
+# # COLUMN RIGHT: LIKERT PLOT 
+# esm_long %>%
+#   # transformation
+#   select(procra_onset, procra_sustain) %>%
+#   # create graph
+#   plot_likert(
+#     title = "Prokrastination",
+#     geom.size = 0.75,
+#     catcount = 7,
+#     values = "sum.outside",
+#     geom.colors = "Reds",
+#     reverse.scale = TRUE,
+#     expand.grid = TRUE) +
+#   labs(subtitle = "1 = gar nicht; 4 = teilweise; 7 = sehr", y = "Anteile in %") #+
+#   #scale_x_discrete(guide = guide_axis(n.dodge=2))
+```
+
+Der Großteil der Teilnehmer:innen berichtete in den Kurzfragebögen eine geringe Ermüdung und Erschöpfung, ein deutlich größerer Teil fühlte sich aktiv. In den Befragungssituationen fühlten sich die Befragten zum Großteil wenig gestresst, die Hälfte der Teilnehmer:innen fühlte sich entspannt. Nur ein sehr geringer Teil der Teilnehmer:innen fühlte sich während der Arbeitssituationen einsam oder isoliert.
+
+## Zusammenhänge zwischen Schlüsselvariablen
+
+```{r}
+#| column: page
+#| fig-width: 16
+#| fig-height: 9
+# #| label: fig-mean_compare
+# #| fig-cap: "Mittelwertvergleich verschiedener Variablen"
+
+# create data
+comp_mean_location <- esm_long %>%
+  # Select variables
+  select(
+    location_work, location_homeoffice, location_office,
+    wellbeing, 
+    #idx_affect, 
+    idx_fatigue, idx_lonely, idx_stress,
+    idx_procra,
+    sm_sum_nocollab_trunc, collabtools_min) %>%
+  # Group by location
+  group_by(location_work, location_homeoffice, location_office) %>% 
+  # Data transformation
+  summarise(
+    across(everything(),
+           list(
+             n = ~sum(!is.na(.x)), 
+             mean = ~mean(.x, na.rm = TRUE),
+             sd = ~sd(.x, na.rm = TRUE)), 
+           .names = "{.col}-{.fn}"),
+    .groups = "drop") %>% 
+  mutate(
+    cat_location = case_when(
+      location_work == 0 & location_homeoffice == 0 & location_office == 0 ~ "no_work",
+      location_work == 1 & location_homeoffice == 0 & location_office == 1 ~ "office",
+      location_work == 1 & location_homeoffice == 1 & location_office == 0 ~ "homeoffice",
+      TRUE ~ NA)) %>% 
+  filter(!is.na(cat_location)) %>% 
+  select(!starts_with("location_")) %>% 
+  relocate(cat_location) %>% 
+  pivot_longer(cols = !cat_location, names_to = "var", values_to = "value") %>% 
+  separate(var, into = c("var", "stat"), sep = "-") %>% 
+  filter(stat != "n") %>%  
+  pivot_wider(id_cols = cat_location:var, names_from = "stat", values_from = "value") %>% 
+  # Data wrangling
+  mutate(
+    location_num = case_when(
+      cat_location == "no_work" ~ 0,
+      cat_location == "office" ~ 1,
+      cat_location == "homeoffice" ~ 2), 
+    fct_location = factor(
+      location_num, 
+      levels = c(0:2), 
+      labels = c("keine Arbeitszeit", "im Büro", "im Homeoffice")),
+    ymin = mean - sd,
+    ymax = mean + sd,
+    across(ymin, ~ifelse(var == "sm_sum_nocollab_trunc", 0, ymin)),
+    label = recode(var,  
+      wellbeing = "Allgemeines Wohlbefinden",
+      #idx_affect = "Affektives Wohlbefinden<sup>1<sup>",
+      idx_fatigue = "Ermüdung<sup>2<sup>", 
+      idx_lonely = "Einsamkeit<sup>1<sup>", 
+      idx_stress = "Stress<sup>4<sup>",
+      idx_procra = "Prokrastination<sup>3<sup>",
+      sm_sum_nocollab_trunc = "Nutzung von sozialen Medien",
+      collabtools_min = "Nutzung von Kollaborationstools"))
+
+
+# GRPAH 1: Indices
+g1 <- comp_mean_location %>% 
+  filter(var != "wellbeing",
+         var != "sm_sum_nocollab_trunc",
+         var != "collabtools_min") %>% 
+  ggplot(aes(label, mean, fill = fct_location)) + 
+  geom_bar(stat = "identity", position="dodge", alpha = 0.8) +
+  # geom_errorbar(
+  #   aes(ymin = ymin, ymax = ymax), 
+  #   width = .2, 
+  #   position = position_dodge(.9),
+  #   color = "grey25") +
+  labs(
+    # title = "**Mittelwertvergleich für verschiedene Variablen in Abhängigkeit vom Aufenthaltsort**",
+    subtitle = "7-stufige Likert-Skala, 1 = gar nicht, 4 = teilweise, 7 = sehr",
+    x = "", 
+    y = "Mittelwert",
+    fill = ""
+  ) +
+  scale_y_continuous(limits = c(0,7), breaks = c(0:7), expand = c(0,0)) +
+  scale_fill_manual(values = c("grey90", "#E29898","#C50F3C")) +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  theme(
+    plot.title = element_markdown(),
+    axis.text.x = element_markdown())
+
+# GRAPH 2: Wellbeing
+g2 <- comp_mean_location %>% 
+  filter(var == "wellbeing") %>% 
+  ggplot(aes(label, mean, fill = fct_location)) + 
+  geom_bar(stat = "identity", position="dodge", alpha = 0.8, width = 0.3) +
+  # geom_errorbar(
+  #   aes(ymin = ymin, ymax = ymax), 
+  #   width = .2, 
+  #   position = position_dodge(.9),
+  #   color = "grey25") +
+  labs(
+    # title = "**Mittelwertvergleich für verschiedene Variablen in Abhängigkeit vom Aufenthaltsort**",
+    subtitle = "11-stufige Skala, 0 = sehr schlecht, 10 = sehr gut",
+    x = "", 
+    y = "",
+    fill = ""
+  ) +
+  scale_y_continuous(limits = c(0, 10), breaks = c(0,2,4,6,8,10), expand = c(0,0)) +
+  scale_fill_manual(values = c("grey90", "#E29898","#C50F3C")) +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  theme(
+    plot.title = element_markdown())
+
+# GRAPH 2: Wellbeing
+g3 <- comp_mean_location %>% 
+  filter(var == "sm_sum_nocollab_trunc" |
+           var == "collabtools_min"
+         ) %>% 
+  ggplot(aes(label, mean, fill = fct_location)) + 
+  geom_bar(stat = "identity", position="dodge", alpha = 0.8, width = 0.5) +
+  # geom_errorbar(
+  #   aes(ymin = 0, ymax = ymax), 
+  #   width = .2, 
+  #   position = position_dodge(.9),
+  #   color = "grey25") +
+  labs(
+    # title = "**Mittelwertvergleich für verschiedene Variablen in Abhängigkeit vom Aufenthaltsort**",
+    subtitle = "Von 0 bis 60 Minuten",
+    x = "", 
+    y = "",
+    fill = ""
+  ) +
+  scale_y_continuous(limits = c(0, 60), expand = c(0,0)) +
+  scale_fill_manual(values = c("grey90", "#E29898","#C50F3C")) +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  theme(
+    plot.title = element_markdown())
+
+
+# COMBINE GRPAHS
+ggarrange(g1, g2, g3,
+          nrow = 1, ncol = 3, 
+          align = "hv",
+          label.y = "",
+          common.legend = TRUE) +
+  labs(title = "**Mittelwertvergleich für verschiedene Variablen in Abhängigkeit vom Aufenthaltsort**",
+       caption = '<sup>1</sup>: Index aus den Items *müde*, *erschöpft*, *aktiv*<br>
+       <sup>2</sup>: Index aus den Items *gestresst* & *entspannt*<br>
+       <sup>3</sup>: Index aus zwei Items<br>
+       <sup>4</sup>: Index aus den Items *einsam* & *isoliert*<br>
+              ') + 
+  theme(plot.title = element_markdown(),
+        plot.caption = element_markdown(size = 10, hjust = 1))
+
+```
+
+Die Teilnehmer:innen gaben in Situationen im Homeoffice und in solchen, in denen sie nicht arbeiteten, eine höhere Einsamkeit als im Büro an. Außerhalb der Arbeitszeit gaben die Teilnehmer:innen eine höhere Ermüdung als im Büro und im Homeoffice an. Zwischen Situationen außerhalb der Arbeitszeit und Situationen im Büro unterscheidet sich das Ausmaß der Prokrastination nur gering, in Situationen im Homeoffice fällt sie höher aus.
+
+Das allgemeine Wohlbefinden unterscheidet sich kaum zwischen Situationen, in denen nicht gearbeitet wurde, Situationen im Homeoffice und Situationen im Büro.
+
+Im Homeoffice werden deutlich mehr Kollaborationstools genutzt als im Büro, während diese außerhalb der Arbeitszeit kaum genutzt werden. Soziale Medien werden hingegen außerhalb der Arbeitszeit deutlich mehr genutzt als im Büro und im Homeoffice, wobei die Nutzungszeit in letzteren Situationen deutlich höher ausfällt als im Büro.
+
+```{r heatmap}
+# #| label: fig-corrmatrix
+# #| fig-cap: "Korrelationsmatrix"
+avs_corr <- esm_long %>% 
+  filter(location_work == 1) %>% 
+  select(wellbeing, 
+         #idx_affect, 
+         idx_fatigue, idx_stress, idx_lonely, idx_procra,
+         sm_sum_nocollab_trunc, collabtools_min,
+         location_homeoffice
+  ) %>% 
+  rename(
+    "Allgemeines Wohlbefinden" = wellbeing,
+    #"Affektives Wohlbefinden (Index)" = idx_affect,
+    "Ermüdung (Index)" = idx_fatigue,
+    "Stress (Index)" = idx_stress,
+    "Einsamkeit (Index)" = idx_lonely,
+    "Prokrastination (Index)" = idx_procra,
+    "Nutzung Social Media Apps" = sm_sum_nocollab_trunc,
+    "Nuztung Kollaborationstools" = collabtools_min,
+    "Arbeit im Homeoffice" = location_homeoffice
+  ) %>% 
+  cor(use = "pairwise.complete.obs") 
+
+avs_pvalues <- avs_corr %>% ggcorrplot::cor_pmat()
+
+avs_corr %>% 
+  ggcorrplot::ggcorrplot(
+    type = "lower",
+    colors = c("#C50F3C", "white", "#C50F3C"),
+    outline.color = "white",
+    lab = TRUE,
+    legend.title = "Korrelation <br> nach Pearson") +
+    labs(
+      title = "**Bivariate Zusammenhänge**",
+      caption = 
+           md("|r| = .05: sehr kleiner Effekt <br>
+              |r| = .10: kleiner Effekt <br>
+              |r| = .20: mittelgroßer Effekt <br>
+              |r| = .30: großer Effekt <br>
+              |r| >= .40: sehr großer Effekt <br>
+              nach Funder & Ozer, 2019")) +
+  theme(
+    legend.title = element_markdown(),
+    plot.title = element_markdown(),
+    plot.caption = element_markdown(size = 10, hjust = 1)
+  )
+```
+
+Für die zentrale Variable Prokrastination liegt wie erwartet ein starker positiver Zusammenhang mit der Ermüdung, Einsamkeit und der Nutzung von Social Media Apps vor. Schwächere positive Zusammenhänge liegen zwischen der Prokrastination und Stress sowie der Arbeit im Homeoffice vor. Außerdem steht die Prokrastination in einem starken negativen Zusammenhang mit dem allgemeinen Wohlbefinden und der Nutzungszeit von Kollaborationstools.
+
+Die Nutzung von Social Media Apps hat einen negativen Effekt auf das Wohlbefinden und hängt positiv mit der Ermüdung und dem Einsamkeitsempfinden zusammen.
+
+Insgesamt hat die Arbeit im Homeoffice, außer einem positiven Zusammenhang mit der Nutzung von Kollaborationstools, nur einen geringen Einfluss auf die zentralen Variablen.
+
+```{r}
+# filter only work probes
+esm_mdl <- esm_long %>% 
+  filter(location_work == 1) %>% 
+  mutate(
+    location_dummy_num = case_when(
+      location_office == 1 ~ 0,
+      location_homeoffice == 1 ~ 1),
+    location_fct = factor(
+      location_dummy_num,
+      levels = c(0:1), 
+      labels = c("Büro", "Homeoffice"))
+  )
+
+
+mdl_list <- list(
+  procra = list(
+    # m0: Nullmodell
+    m0 = esm_mdl %>% 
+      filter(
+        !is.na(idx_procra),
+        !is.na(sm_sum_pmc), 
+        !is.na(location_fct)) %>%
+      lmer(idx_procra ~ 1 +
+             (1 | serial),
+           data = .), 
+    # m1: 1 L1 Prädiktor + 1 dummy variable
+    m1 = esm_mdl %>% 
+      lmer(idx_procra ~ 1 
+           + sm_sum_pmc 
+           + location_fct 
+           + (1 | serial),
+           data = .), 
+    m2 = esm_mdl %>% 
+      lmer(idx_procra ~ 1 
+           + sm_sum_pmc*location_fct
+           + (1 | serial),
+           data = .)
+  ), 
+  wellbeing = list(
+    m0 = esm_mdl %>% 
+      filter(
+        !is.na(wellbeing),
+        !is.na(sm_sum_pmc), 
+        !is.na(location_fct)) %>%
+      lmer(wellbeing ~ 1 
+           + (1 | serial), data = .), 
+    m1 = esm_mdl %>% 
+      lmer(wellbeing ~ 1 
+           + sm_sum_pmc 
+           + location_fct
+           + (1 | serial),
+           data = .), 
+    m2 = esm_mdl %>% 
+      lmer(wellbeing ~ 1 
+           + sm_sum_pmc*location_fct
+           + (1 | serial),
+           data = .)
+  ),
+  affect = list(
+    m0 = esm_mdl %>% 
+      filter(
+        !is.na(idx_affect),
+        !is.na(sm_sum_pmc), 
+        !is.na(location_fct)) %>% 
+      lmer(idx_affect ~ 1 
+           + (1 | serial),
+           data = .),
+    m1 = esm_mdl %>% 
+      lmer(idx_affect ~ 1 
+           + sm_sum_pmc 
+           + location_fct
+           + (1 | serial),
+           data = .),
+    m2 = esm_mdl %>% 
+      lmer(idx_affect ~ 1 
+           + sm_sum_pmc*location_fct
+           + (1 | serial),
+           data = .)
+  )
+)
+```
+
+### Fokus auf Arbeitssituationen
+
+```{r}
+# #| label: fig-interaction
+# #| fig-cap: "Interaktion"
+
+# column left: procra
+mdl_list$procra$m2 %>%
+  plot_model(
+    .,type = "int", 
+    mdrt.values = "meansd",
+    colors = c("#04316a", "#C50F3C")
+    ) +
+  ggpubr::theme_pubr() +
+  labs(
+    x = "Nutzung sozialer Medien (zentriert am Mittelwert der Person)",
+    y = "Prokrasination (Index)", 
+    title = "**Zusammenhang von Prokrastination und Social Media-Nutzung**", 
+    subtitle = "Inklusive Kollaborationstools; In Abhängingkeit vom Arbeitsort",
+    color = "Arbeitsort") +
+  theme(
+    plot.title = element_markdown()
+  )
+
+# # column middle: wellbeing
+# mdl_list$wellbeing$m2 %>%
+#   plot_model(.,type = "int", mdrt.values = "meansd") +
+#   ggpubr::theme_pubr() +
+#   labs(
+#     x = "Nutzung sozialer Medien (zentriert am Mittelwert der Person)",
+#     y = "Allgemeines Wohlbefinden",
+#     title = "",
+#     color = "Arbeitsort")
+# 
+# # column middle: affect
+# mdl_list$affect$m2 %>%
+#   plot_model(.,type = "int", mdrt.values = "meansd") +
+#   ggpubr::theme_pubr() +
+#   labs(
+#     x = "Nutzung sozialer Medien (zentriert am Mittelwert der Person)",
+#     y = "Affektives Wohlbefinden (Index)",
+#     title = "",
+#     color = "Arbeitsort")
+```
+
+Im Homeoffice wird signifikant mehr prokrastiniert als im Büro (b = 0.20, p \< .05). Die Zeit, die für die Nutzung sozialer Medien aufgewendet wird, hat keinen signifikanten Einfluss auf die Prokrastination (b = 0.00, p \> 0.05). Es lieg ein schwacher, signifikanter Interaktionseffekt der Nutzung sozialer Medien mit der Arbeit im Homeoffice vor (b = -0.01, p \< 0.05). Dies wird auch durch die obige Abbildung bestätigt: im Büro ging soziale Mediennutzung mit mehr Prokrastination einher, während sie im Homeoffice mit weniger Prokrastination einherging.
+
+```{=html}
+<!-- 
+In Situationen im Homeoffice ist das allgemeine Wohlbefinden nicht signifikant höher als im Büro (b = -0.00, p \> .05). Die Zeit, die in der letzten Stunde für die Nutzung sozialer Medien aufgewendet wurde, hat keinen signifikanten Einfluss auf das situative allgemeine Wohlbefinden (b = 0.00, p \> 0.05). -->
+```

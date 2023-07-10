@@ -1,0 +1,18 @@
+/* css styles */
+
+/* setting title banner to waves */
+
+.navbar {
+  background-image: url("img/pexels-suzy-hazelwood-1629236.jpg") !important;
+  background-size: cover !important;
+}
+
+.navbar-brand {
+  filter: drop-shadow(1px 1px 5px rgb(0 0 0 / 1));
+}
+
+.navbar-title {
+  filter: drop-shadow(1px 1px 5px rgb(0 0 0 / .5));
+  font-size: larger;
+  font-weight: bold;
+}

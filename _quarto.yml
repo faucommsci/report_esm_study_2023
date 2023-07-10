@@ -1,0 +1,72 @@
+project:
+  type: website
+  render:
+    - index.qmd
+  output-dir: docs
+
+lang: de
+
+website:
+  title: "Wohlbefinden, Arbeitsalltag und soziale Medien"
+  description: 'Zusammenfassung der Ergebnisse der Studie "Wohlbefinden, Arbeitsalltag und soziale Medien"'
+  favicon: img/logo.svg
+ 
+  page-navigation: true
+  search: 
+    location: navbar
+    type: textbox
+
+  repo-url: https://github.com/faucommsci/report_esm_study_2023
+  repo-actions: [issue]
+  
+
+  page-footer:
+    right: |
+     This page is built with [Quarto](https://quarto.org/).
+    left: |
+      Copyright 2023, [FAU | Juniorprofessur für Kommunikationswissenschaft](https://www.kommunikationswissenschaft.rw.fau.de/)
+      
+  navbar:
+    background: primary
+    logo: img/fau_wiso_white.svg
+    search: true
+    collapse: true
+    border: true
+
+    # left:
+    #   - href: index.qmd
+    #     text: Home
+      
+    right:
+      - icon: twitter
+        href: https://twitter.com/admeierlab
+        aria-label: Twitter
+      - icon: house
+        href: https://www.kommunikationswissenschaft.rw.fau.de/
+        aria-label: Home
+      # - icon: envelope
+      #   href: mailto:adrian.meier@fau.de
+      #   aria-label: E-Mail
+
+format:
+  html:
+    theme: cosmo
+    css: styles.css
+    toc: true
+  # pdf:
+  #   default-image-extension: png
+  #   documentclass: scrreprt
+  #   latex-auto-mk: true
+  #   pdf-engine: xelatex
+  #   latex-output-dir: pdf
+  #   csl: https://www.zotero.org/styles/apa
+  #   number-depth: 2
+    
+crossref:
+  fig-title: '**Abb.**'
+  fig-labels: arabic
+  tbl-title: '**Tabelle**'
+  tbl-labels: arabic
+
+
+
