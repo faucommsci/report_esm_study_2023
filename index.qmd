@@ -1303,11 +1303,8 @@ avs_corr <- esm_long %>%
          sm_sum_nocollab_trunc, collabtools_min,
          location_homeoffice
   ) %>% 
-  rec(wellbeing, rec = "rev") %>% 
-  select(!wellbeing) %>%
-  relocate(wellbeing_r) %>%  
   rename(
-    "Allgemeine Belastung" = wellbeing_r,
+    "Allgemeines Wohlbefinden" = wellbeing,
     #"Affektives Wohlbefinden (Index)" = idx_affect,
     "Ermüdung (Index)" = idx_fatigue,
     "Stress (Index)" = idx_stress,
