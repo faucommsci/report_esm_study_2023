@@ -1303,8 +1303,11 @@ avs_corr <- esm_long %>%
          sm_sum_nocollab_trunc, collabtools_min,
          location_homeoffice
   ) %>% 
+  rec(wellbeing, rec = "rev") %>% 
+  select(!wellbeing) %>%
+  relocate(wellbeing_r) %>%  
   rename(
-    "Allgemeines Wohlbefinden" = wellbeing,
+    "Allgemeine Belastung" = wellbeing_r,
     #"Affektives Wohlbefinden (Index)" = idx_affect,
     "Ermüdung (Index)" = idx_fatigue,
     "Stress (Index)" = idx_stress,
@@ -1321,7 +1324,7 @@ avs_pvalues <- avs_corr %>% ggcorrplot::cor_pmat()
 avs_corr %>% 
   ggcorrplot::ggcorrplot(
     type = "lower",
-    colors = c("#C50F3C", "white", "#C50F3C"),
+    colors = c("#04316a", "white", "#C50F3C"),
     outline.color = "white",
     lab = TRUE,
     legend.title = "Korrelation <br> nach Pearson") +
